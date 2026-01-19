@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Code Refactor</title>
+    <style>
+        :root { --primary: #2563eb; --bg: #f8fafc; --surface: #ffffff; }
+        body { font-family: sans-serif; background: var(--bg); display: flex; justify-content: center; padding-top: 50px; }
+        .card { background: var(--surface); padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); width: 100%; max-width: 500px; }
+        h1 { margin-top: 0; color: #1e293b; font-size: 1.5rem; }
+        .form-group { margin-bottom: 1.5rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: 600; color: #475569; }
+        input[type="file"] { border: 1px solid #cbd5e1; padding: 0.5rem; width: 100%; border-radius: 6px; box-sizing: border-box; }
+        textarea { width: 100%; padding: 0.75rem; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; resize: vertical; min-height: 100px; font-family: monospace; }
+        button { background: var(--primary); color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 6px; cursor: pointer; width: 100%; font-weight: 600; transition: background 0.2s; }
+        button:hover { background: #1d4ed8; }
+        button:disabled { background: #94a3b8; cursor: not-allowed; }
+        .status { margin-top: 1rem; text-align: center; color: #64748b; font-size: 0.9rem; }
+        .download-btn { display: block; text-align: center; margin-top: 1rem; color: var(--primary); text-decoration: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>AI Refactor Tool</h1>
+        <form id="refactorForm">
+            <div class="form-group">
+                <label>1. Upload Project (.zip)</label>
+                <input type="file" id="fileInput" accept=".zip" required>
+            </div>
+            <div class="form-group">
+                <label>2. Instructions</label>
+                <textarea id="instructions" placeholder="e.g. Add TypeScript types to all variables..." required></textarea>
+            </div>
+            <button type="submit" id="submitBtn">Start Refactoring</button>
+        </form>
+        <div class="status" id="status"></div>
+        <a id="downloadLink" class="download-btn"></a>
+    </div>
+
+    <script>
+        const form = document.getElementById('refactorForm');
+        const status = document.getElementById('status');
+        const downloadLink = document.getElementById('downloadLink');
+        const btn = document.getElementById('submitBtn');
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            btn.disabled = true;
+            status.textContent = "Uploading and processing... (This may take a few minutes)";
+            downloadLink.textContent = "";
+
+            const formData = new FormData();
+            formData.append('file', document.getElementById('fileInput').files[0]);
+            formData.append('instructions', document.getElementById('instructions').value);
+
+            try {
+                const res = await fetch('/refactor', { method: 'POST', body: formData });
+                if (!res.ok) throw new Error("Server Error");
+                
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                
+                downloadLink.href = url;
+                downloadLink.download = "refactored_project.zip";
+                downloadLink.textContent = "Download Complete! Click here.";
+                status.textContent = "Done.";
+            } catch (err) {
+                status.textContent = "Error: " + err.message;
+            } finally {
+                btn.disabled = false;
+            }
+        };
+    </script>
+</body>
+</html>
