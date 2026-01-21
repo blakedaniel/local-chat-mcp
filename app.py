@@ -9,21 +9,41 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
+from typing import Union
 from mcp import StdioServerParameters
 
-from mcp_client import MCPClientManager, execute_tool_calls
+from mcp_client import MCPClientManager, SSEServerParameters, execute_tool_calls
 
 # MCP Client Manager - Global instance
 mcp_manager = MCPClientManager()
 
 # MCP Server configurations
-# Add your MCP servers here. Examples:
-# - Filesystem server: gives LLM access to read/write files
-# - Git server: gives LLM access to git operations
-# - Custom servers: any MCP-compatible server
-MCP_SERVERS: dict[str, StdioServerParameters] = {
-    # Example configurations (uncomment and modify as needed):
-    #
+# Add your MCP servers here. Supports both stdio and SSE transports.
+#
+# Stdio servers: Local processes launched via command line
+# SSE servers: Remote servers accessed via HTTP (like git-mcp)
+#
+MCP_SERVERS: dict[str, Union[StdioServerParameters, SSEServerParameters]] = {
+    # --- SSE-based servers (remote) ---
+
+    # GitMCP - Access any GitHub repository's documentation and code
+    # URL format: https://gitmcp.io/{owner}/{repo}
+    # Tools provided:
+    #   - fetch_<repo>_documentation: Get primary docs (llms.txt, README)
+    #   - search_<repo>_documentation: Search through documentation
+    #   - search_<repo>_code: Search repository code via GitHub
+    #   - fetch_url_content: Fetch content from referenced URLs
+    "git-mcp": SSEServerParameters(
+        url="https://gitmcp.io"
+    ),
+
+    # Example: Connect to a specific repository
+    # "react-docs": SSEServerParameters(
+    #     url="https://gitmcp.io/facebook/react"
+    # ),
+
+    # --- Stdio-based servers (local) ---
+
     # "filesystem": StdioServerParameters(
     #     command="npx",
     #     args=["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
@@ -32,11 +52,6 @@ MCP_SERVERS: dict[str, StdioServerParameters] = {
     # "git": StdioServerParameters(
     #     command="npx",
     #     args=["-y", "@modelcontextprotocol/server-git"]
-    # ),
-    #
-    # "fetch": StdioServerParameters(
-    #     command="npx",
-    #     args=["-y", "@modelcontextprotocol/server-fetch"]
     # ),
 }
 
@@ -292,7 +307,7 @@ async def list_mcp_tools():
 @app.post("/mcp/servers/{server_name}/connect")
 async def connect_mcp_server(server_name: str, command: str = Form(...), args: str = Form("")):
     """
-    Connect to a new MCP server.
+    Connect to a new stdio-based MCP server.
 
     Args:
         server_name: Unique identifier for the server
@@ -318,6 +333,51 @@ async def connect_mcp_server(server_name: str, command: str = Form(...), args: s
             return {
                 "status": "connected",
                 "server": server_name,
+                "transport": "stdio",
+                "tools": [t.name for t in tools]
+            }
+        else:
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Connection started but server not ready"}
+            )
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Failed to connect: {str(e)}"}
+        )
+
+
+@app.post("/mcp/servers/{server_name}/connect-sse")
+async def connect_mcp_sse_server(server_name: str, url: str = Form(...)):
+    """
+    Connect to a new SSE-based MCP server (like git-mcp).
+
+    Args:
+        server_name: Unique identifier for the server
+        url: The SSE endpoint URL (e.g., "https://gitmcp.io/facebook/react")
+    """
+    if mcp_manager.is_connected(server_name):
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Server '{server_name}' is already connected"}
+        )
+
+    try:
+        params = SSEServerParameters(url=url)
+
+        mcp_manager.start_server(server_name, params)
+        # Give it a moment to connect
+        await asyncio.sleep(2)
+
+        if mcp_manager.is_connected(server_name):
+            tools = mcp_manager.get_tools_for_server(server_name)
+            return {
+                "status": "connected",
+                "server": server_name,
+                "transport": "sse",
+                "url": url,
                 "tools": [t.name for t in tools]
             }
         else:

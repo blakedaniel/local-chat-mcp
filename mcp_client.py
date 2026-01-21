@@ -3,17 +3,34 @@ MCP Client Manager for integrating Model Context Protocol capabilities.
 
 This module provides a client manager that connects to MCP servers and exposes
 their tools for use by the LLM during code processing.
+
+Supports both stdio and SSE (Server-Sent Events) transports.
 """
 
 import json
 import re
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Union
 from contextlib import asynccontextmanager
+from enum import Enum
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.client.sse import sse_client
+
+
+class TransportType(Enum):
+    """Supported MCP transport types."""
+    STDIO = "stdio"
+    SSE = "sse"
+
+
+@dataclass
+class SSEServerParameters:
+    """Parameters for connecting to an SSE-based MCP server."""
+    url: str
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -31,6 +48,7 @@ class MCPServerConnection:
     session: ClientSession
     read_stream: Any
     write_stream: Any
+    transport_type: TransportType = TransportType.STDIO
     tools: list[MCPTool] = field(default_factory=list)
 
 
@@ -39,7 +57,7 @@ class MCPClientManager:
     Manages MCP client connections to multiple servers.
 
     This class handles:
-    - Connecting to MCP servers via stdio transport
+    - Connecting to MCP servers via stdio or SSE transport
     - Discovering and caching available tools
     - Executing tool calls and returning results
     - Formatting tools for LLM consumption
@@ -50,8 +68,8 @@ class MCPClientManager:
         self._connection_tasks: dict[str, asyncio.Task] = {}
 
     @asynccontextmanager
-    async def _create_connection(self, server_name: str, params: StdioServerParameters):
-        """Create and yield an MCP server connection."""
+    async def _create_stdio_connection(self, server_name: str, params: StdioServerParameters):
+        """Create and yield a stdio-based MCP server connection."""
         async with stdio_client(params) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
@@ -72,18 +90,66 @@ class MCPClientManager:
                     session=session,
                     read_stream=read_stream,
                     write_stream=write_stream,
+                    transport_type=TransportType.STDIO,
                     tools=tools
                 )
 
                 yield connection
 
-    async def connect(self, server_name: str, params: StdioServerParameters) -> list[MCPTool]:
+    @asynccontextmanager
+    async def _create_sse_connection(self, server_name: str, params: SSEServerParameters):
+        """Create and yield an SSE-based MCP server connection."""
+        async with sse_client(params.url, params.headers) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+
+                # Discover available tools
+                tools_result = await session.list_tools()
+                tools = [
+                    MCPTool(
+                        server_name=server_name,
+                        name=tool.name,
+                        description=tool.description or "",
+                        input_schema=tool.inputSchema if hasattr(tool, 'inputSchema') else {}
+                    )
+                    for tool in tools_result.tools
+                ]
+
+                connection = MCPServerConnection(
+                    session=session,
+                    read_stream=read_stream,
+                    write_stream=write_stream,
+                    transport_type=TransportType.SSE,
+                    tools=tools
+                )
+
+                yield connection
+
+    @asynccontextmanager
+    async def _create_connection(
+        self,
+        server_name: str,
+        params: Union[StdioServerParameters, SSEServerParameters]
+    ):
+        """Create and yield an MCP server connection based on params type."""
+        if isinstance(params, SSEServerParameters):
+            async with self._create_sse_connection(server_name, params) as connection:
+                yield connection
+        else:
+            async with self._create_stdio_connection(server_name, params) as connection:
+                yield connection
+
+    async def connect(
+        self,
+        server_name: str,
+        params: Union[StdioServerParameters, SSEServerParameters]
+    ) -> list[MCPTool]:
         """
         Connect to an MCP server and discover its tools.
 
         Args:
             server_name: A unique identifier for this server connection
-            params: StdioServerParameters with command and args to launch the server
+            params: StdioServerParameters or SSEServerParameters for the server
 
         Returns:
             List of discovered MCPTool objects
@@ -96,17 +162,22 @@ class MCPClientManager:
             print(f"Connected to MCP server '{server_name}' with {len(connection.tools)} tools")
             return connection.tools
 
-    async def connect_persistent(self, server_name: str, params: StdioServerParameters):
+    async def connect_persistent(
+        self,
+        server_name: str,
+        params: Union[StdioServerParameters, SSEServerParameters]
+    ):
         """
         Establish a persistent connection to an MCP server.
 
         This method starts the connection in a way that keeps it alive
         for the duration of the application lifecycle.
         """
+        transport_type = "SSE" if isinstance(params, SSEServerParameters) else "stdio"
         try:
             async with self._create_connection(server_name, params) as connection:
                 self.connections[server_name] = connection
-                print(f"Connected to MCP server '{server_name}' with {len(connection.tools)} tools")
+                print(f"Connected to MCP server '{server_name}' ({transport_type}) with {len(connection.tools)} tools")
 
                 # Keep connection alive until cancelled
                 while True:
@@ -121,7 +192,11 @@ class MCPClientManager:
             print(f"Error connecting to MCP server '{server_name}': {e}")
             raise
 
-    def start_server(self, server_name: str, params: StdioServerParameters) -> asyncio.Task:
+    def start_server(
+        self,
+        server_name: str,
+        params: Union[StdioServerParameters, SSEServerParameters]
+    ) -> asyncio.Task:
         """
         Start an MCP server connection as a background task.
 
