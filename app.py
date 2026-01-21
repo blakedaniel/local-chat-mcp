@@ -90,8 +90,8 @@ templates = Jinja2Templates(directory="templates")
 
 # Configuration
 OLLAMA_URL = "http://ollama:11434/api/generate"
-# 14B is crucial here. 3B struggles to generate multi-file projects consistently.
-MODEL_NAME = "qwen2.5-coder:14b" 
+# Using smaller model for testing. For production multi-file projects, use qwen2.5-coder:14b
+MODEL_NAME = "qwen2.5-coder:1.5b" 
 
 ALLOWED_EXTENSIONS = {
     '.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', 
