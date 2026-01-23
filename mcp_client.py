@@ -18,19 +18,27 @@ from enum import Enum
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamable_http_client
 
 
 class TransportType(Enum):
     """Supported MCP transport types."""
     STDIO = "stdio"
     SSE = "sse"
+    STREAMABLE_HTTP = "streamable_http"
 
 
 @dataclass
 class SSEServerParameters:
-    """Parameters for connecting to an SSE-based MCP server."""
+    """Parameters for connecting to an SSE-based MCP server (legacy)."""
     url: str
     headers: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class StreamableHTTPServerParameters:
+    """Parameters for connecting to a Streamable HTTP MCP server."""
+    url: str
 
 
 @dataclass
@@ -126,13 +134,45 @@ class MCPClientManager:
                 yield connection
 
     @asynccontextmanager
+    async def _create_streamable_http_connection(self, server_name: str, params: "StreamableHTTPServerParameters"):
+        """Create and yield a Streamable HTTP-based MCP server connection."""
+        async with streamable_http_client(params.url) as (read_stream, write_stream, get_session_id):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+
+                # Discover available tools
+                tools_result = await session.list_tools()
+                tools = [
+                    MCPTool(
+                        server_name=server_name,
+                        name=tool.name,
+                        description=tool.description or "",
+                        input_schema=tool.inputSchema if hasattr(tool, 'inputSchema') else {}
+                    )
+                    for tool in tools_result.tools
+                ]
+
+                connection = MCPServerConnection(
+                    session=session,
+                    read_stream=read_stream,
+                    write_stream=write_stream,
+                    transport_type=TransportType.STREAMABLE_HTTP,
+                    tools=tools
+                )
+
+                yield connection
+
+    @asynccontextmanager
     async def _create_connection(
         self,
         server_name: str,
-        params: Union[StdioServerParameters, SSEServerParameters]
+        params: Union[StdioServerParameters, SSEServerParameters, "StreamableHTTPServerParameters"]
     ):
         """Create and yield an MCP server connection based on params type."""
-        if isinstance(params, SSEServerParameters):
+        if isinstance(params, StreamableHTTPServerParameters):
+            async with self._create_streamable_http_connection(server_name, params) as connection:
+                yield connection
+        elif isinstance(params, SSEServerParameters):
             async with self._create_sse_connection(server_name, params) as connection:
                 yield connection
         else:
@@ -142,7 +182,7 @@ class MCPClientManager:
     async def connect(
         self,
         server_name: str,
-        params: Union[StdioServerParameters, SSEServerParameters]
+        params: Union[StdioServerParameters, SSEServerParameters, StreamableHTTPServerParameters]
     ) -> list[MCPTool]:
         """
         Connect to an MCP server and discover its tools.
@@ -165,7 +205,7 @@ class MCPClientManager:
     async def connect_persistent(
         self,
         server_name: str,
-        params: Union[StdioServerParameters, SSEServerParameters]
+        params: Union[StdioServerParameters, SSEServerParameters, StreamableHTTPServerParameters]
     ):
         """
         Establish a persistent connection to an MCP server.
@@ -173,7 +213,12 @@ class MCPClientManager:
         This method starts the connection in a way that keeps it alive
         for the duration of the application lifecycle.
         """
-        transport_type = "SSE" if isinstance(params, SSEServerParameters) else "stdio"
+        if isinstance(params, StreamableHTTPServerParameters):
+            transport_type = "Streamable HTTP"
+        elif isinstance(params, SSEServerParameters):
+            transport_type = "SSE"
+        else:
+            transport_type = "stdio"
         try:
             async with self._create_connection(server_name, params) as connection:
                 self.connections[server_name] = connection
@@ -195,7 +240,7 @@ class MCPClientManager:
     def start_server(
         self,
         server_name: str,
-        params: Union[StdioServerParameters, SSEServerParameters]
+        params: Union[StdioServerParameters, SSEServerParameters, StreamableHTTPServerParameters]
     ) -> asyncio.Task:
         """
         Start an MCP server connection as a background task.

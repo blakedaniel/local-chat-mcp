@@ -5,6 +5,7 @@ import tempfile
 import asyncio
 import httpx
 import re
+import dotenv
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -12,19 +13,23 @@ from fastapi.templating import Jinja2Templates
 from typing import Union
 from mcp import StdioServerParameters
 
-from mcp_client import MCPClientManager, SSEServerParameters, execute_tool_calls
+from mcp_client import MCPClientManager, SSEServerParameters, StreamableHTTPServerParameters, execute_tool_calls
+
+# Load environment variables from .env file
+dotenv.load_dotenv()
 
 # MCP Client Manager - Global instance
 mcp_manager = MCPClientManager()
 
 # MCP Server configurations
-# Add your MCP servers here. Supports both stdio and SSE transports.
+# Add your MCP servers here. Supports stdio, SSE, and Streamable HTTP transports.
 #
 # Stdio servers: Local processes launched via command line
-# SSE servers: Remote servers accessed via HTTP (like git-mcp)
+# SSE servers: Remote servers accessed via legacy SSE transport
+# Streamable HTTP servers: Remote servers using the newer HTTP transport (like GitMCP)
 #
-MCP_SERVERS: dict[str, Union[StdioServerParameters, SSEServerParameters]] = {
-    # --- SSE-based servers (remote) ---
+MCP_SERVERS: dict[str, Union[StdioServerParameters, SSEServerParameters, StreamableHTTPServerParameters]] = {
+    # --- Streamable HTTP servers (remote) ---
 
     # GitMCP - Access any GitHub repository's documentation and code
     # URL format: https://gitmcp.io/{owner}/{repo}
@@ -33,8 +38,11 @@ MCP_SERVERS: dict[str, Union[StdioServerParameters, SSEServerParameters]] = {
     #   - search_<repo>_documentation: Search through documentation
     #   - search_<repo>_code: Search repository code via GitHub
     #   - fetch_url_content: Fetch content from referenced URLs
-    "git-mcp": SSEServerParameters(
-        url="https://gitmcp.io"
+    "nuxt-docs": StreamableHTTPServerParameters(
+        url="https://gitmcp.io/nuxt/nuxt"
+    ),
+    "sprint-boot-docs": StreamableHTTPServerParameters(
+        url="https://gitmcp.io/spring-projects/spring-boot"
     ),
 
     # Example: Connect to a specific repository
@@ -89,9 +97,8 @@ app = FastAPI(lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
 
 # Configuration
-OLLAMA_URL = "http://ollama:11434/api/generate"
-# Using smaller model for testing. For production multi-file projects, use qwen2.5-coder:14b
-MODEL_NAME = "qwen2.5-coder:1.5b" 
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434/api/generate")
+MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5-coder:1.5b")
 
 ALLOWED_EXTENSIONS = {
     '.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', 
@@ -111,10 +118,13 @@ def parse_and_save_files(raw_text: str, base_dir: str):
     # If we didn't find at least one split (3 segments: preamble, filename, content), 
     # then it's a standard single-file response.
     if len(segments) < 3:
+        print(">>> [parse_and_save_files] No multi-file markers found")
+        breakpoint()
         return None 
 
     created_files = []
-    
+    print(">>> [parse_and_save_files] Detected multi-file output")
+    breakpoint()
     # Segments structure: [preamble, filename1, content1, filename2, content2...]
     # We skip index 0 (preamble) and iterate by 2
     for i in range(1, len(segments), 2):
@@ -123,6 +133,8 @@ def parse_and_save_files(raw_text: str, base_dir: str):
         
         # Cleanup markdown code blocks from the content if present
         if content.strip().startswith("```"):
+            print(">>> [parse_and_save_files] Removing markdown code block markers")
+            breakpoint()
             lines = content.splitlines()
             if lines[0].startswith("```"): lines = lines[1:]
             if lines and lines[-1].startswith("```"): lines = lines[:-1]
