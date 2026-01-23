@@ -118,13 +118,9 @@ def parse_and_save_files(raw_text: str, base_dir: str):
     # If we didn't find at least one split (3 segments: preamble, filename, content), 
     # then it's a standard single-file response.
     if len(segments) < 3:
-        print(">>> [parse_and_save_files] No multi-file markers found")
-        breakpoint()
         return None 
 
     created_files = []
-    print(">>> [parse_and_save_files] Detected multi-file output")
-    breakpoint()
     # Segments structure: [preamble, filename1, content1, filename2, content2...]
     # We skip index 0 (preamble) and iterate by 2
     for i in range(1, len(segments), 2):
@@ -133,8 +129,6 @@ def parse_and_save_files(raw_text: str, base_dir: str):
         
         # Cleanup markdown code blocks from the content if present
         if content.strip().startswith("```"):
-            print(">>> [parse_and_save_files] Removing markdown code block markers")
-            breakpoint()
             lines = content.splitlines()
             if lines[0].startswith("```"): lines = lines[1:]
             if lines and lines[-1].startswith("```"): lines = lines[:-1]
