@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+python-multipart
+httpx
+mcp>=1.0.0
+anyio
+jinja2

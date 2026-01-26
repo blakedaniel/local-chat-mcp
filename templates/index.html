@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI DevOps Agent</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; max-width: 650px; margin: 40px auto; padding: 20px; background: #f8fafc; color: #334155; }
+        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; color: #0f172a; }
+        label { display: block; margin-top: 15px; font-weight: 600; font-size: 0.9rem; }
+        input, textarea { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; font-family: inherit; }
+        input:focus, textarea:focus { outline: 2px solid #2563eb; border-color: transparent; }
+        .note { font-size: 0.8rem; color: #64748b; margin-top: 4px; }
+        button { background-color: #2563eb; color: white; padding: 12px; border: none; width: 100%; margin-top: 25px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 1rem; transition: background 0.2s; }
+        button:hover { background-color: #1d4ed8; }
+        #status { margin-top: 20px; padding: 15px; border-radius: 6px; display: none; }
+        .success { background-color: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .error { background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .loader { display: inline-block; width: 12px; height: 12px; border: 2px solid #fff; border-radius: 50%; border-top-color: transparent; animation: spin 1s linear infinite; margin-right: 8px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>🚀 AI DevOps Agent</h2>
+        <form id="agentForm">
+            <label>Source Repo URL</label>
+            <input type="text" name="source_url" placeholder="https://github.com/username/legacy-app" required>
+            <div class="note">The public or private repo you want to refactor.</div>
+
+            <label>New Repo Name</label>
+            <input type="text" name="new_repo_name" placeholder="my-refactored-app-v1" required>
+            <div class="note">This will be created in your account.</div>
+
+            <label>GitHub Token</label>
+            <input type="password" name="github_token" placeholder="ghp_xxxxxxxxxxxx" required>
+            <div class="note">Must have 'repo' scope to read source and create target.</div>
+
+            <label>Instructions</label>
+            <textarea name="instructions" rows="5" placeholder="Convert this to Java Spring Boot. Create a pom.xml, Dockerfile, and src structure..." required></textarea>
+
+            <button type="submit" id="submitBtn">Start Refactor & Push</button>
+        </form>
+
+        <div id="status"></div>
+    </div>
+
+    <script>
+        const form = document.getElementById('agentForm');
+        const statusDiv = document.getElementById('status');
+        const btn = document.getElementById('submitBtn');
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loader"></span>Processing... (This may take minutes)';
+            statusDiv.style.display = 'none';
+
+            const formData = new FormData(form);
+
+            try {
+                const res = await fetch('/convert-and-push', { method: 'POST', body: formData });
+                const result = await res.json();
+
+                statusDiv.style.display = 'block';
+                if (result.status === 'success') {
+                    statusDiv.className = 'success';
+                    statusDiv.innerHTML = `✅ <strong>Success!</strong><br>New repo created: <a href="${result.link}" target="_blank">${result.new_repo}</a>`;
+                } else {
+                    statusDiv.className = 'error';
+                    statusDiv.textContent = '❌ Error: ' + (result.error || 'Unknown error');
+                }
+            } catch (err) {
+                statusDiv.style.display = 'block';
+                statusDiv.className = 'error';
+                statusDiv.textContent = '❌ Network Error: ' + err.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Start Refactor & Push';
+            }
+        };
+    </script>
+</body>
+</html>
