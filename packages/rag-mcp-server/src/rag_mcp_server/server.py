@@ -17,19 +17,16 @@ rag_engine = RAGEngine()
 @asynccontextmanager
 async def lifespan(mcp: FastMCP) -> AsyncIterator[dict]:
     """Initialize RAG engine on startup, cleanup on shutdown."""
-    print(f"Initializing RAG MCP Server...")
-    print(f"  LLM Model: {settings.llm_model}")
-    print(f"  Embedding Model: {settings.embedding_model}")
-    print(f"  Qdrant: {settings.qdrant_host}:{settings.qdrant_port}")
-    print(f"  Collection: {settings.collection_name}")
-
-    await rag_engine.initialize()
-    print("RAG Engine initialized successfully!")
+    if not rag_engine._initialized:
+        print(f"Initializing RAG MCP Server...")
+        print(f"  LLM Model: {settings.llm_model}")
+        print(f"  Embedding Model: {settings.embedding_model}")
+        print(f"  Qdrant: {settings.qdrant_host}:{settings.qdrant_port}")
+        print(f"  Collection: {settings.collection_name}")
+        await rag_engine.initialize()
+        print("RAG Engine initialized successfully!")
 
     yield {"rag_engine": rag_engine}
-
-    print("Shutting down RAG MCP Server...")
-    await rag_engine.shutdown()
 
 
 # Create the FastMCP server

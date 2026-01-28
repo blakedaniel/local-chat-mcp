@@ -13,6 +13,7 @@ dependencies = [
     "mcp>=1.0.0",
     "anyio",
     "python-dotenv",
+    "rag-mcp-server",
 ]
 
 [project.scripts]
@@ -26,7 +27,7 @@ rag-mcp-server = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
-build-backend = "hatchling.backends"
+build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/local_chat_agent"]

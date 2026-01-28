@@ -22,7 +22,7 @@ class AppSettings:
     port: int = 8000
 
     # Ollama
-    ollama_url: str = "http://ollama:11434/api/generate"
+    ollama_url: str = "http://localhost:11434/api/generate"
     model_name: str = "qwen2.5-coder:1.5b-base"
 
     # Paths

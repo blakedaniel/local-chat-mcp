@@ -4,10 +4,9 @@
 
 set -e
 
-# Install dependencies
+# Install dependencies (uv handles the workspace + build backend)
 echo "Installing Python dependencies..."
-pip install -e .
-pip install -e packages/rag-mcp-server
+uv sync
 
 # Start Qdrant container if not running
 if ! docker ps --format '{{.Names}}' | grep -q '^qdrant_backend$'; then
@@ -36,9 +35,18 @@ mkdir -p data
 
 # Start RAG MCP server in background
 echo "Starting RAG MCP server on port 8001..."
-python -m rag_mcp_server &
+uv run python -m rag_mcp_server &
 RAG_PID=$!
-sleep 2
+
+# Wait for RAG server to be ready
+echo "Waiting for RAG server to be ready..."
+for i in $(seq 1 15); do
+    if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost',8001)); s.close()" 2>/dev/null; then
+        echo "RAG server is ready!"
+        break
+    fi
+    sleep 1
+done
 
 # Trap to cleanup background processes on exit
 cleanup() {
@@ -55,4 +63,4 @@ trap cleanup SIGINT SIGTERM
 
 # Start the main app
 echo "Starting main app on port 8000..."
-python -m local_chat_agent
+uv run python -m local_chat_agent

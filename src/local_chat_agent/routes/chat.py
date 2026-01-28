@@ -9,7 +9,7 @@ import asyncio
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, File, Form, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from ..config import settings
 
@@ -68,17 +68,25 @@ async def process_file(
     client: httpx.AsyncClient,
     extract_root: str,
     mcp_manager=None,
-):
-    """Process a single file through the LLM with optional RAG context."""
+) -> dict:
+    """Process a single file through the LLM with optional RAG context.
+
+    Returns a dict with keys: filename, status ("success", "error", "skipped"), error (optional).
+    """
     filename = os.path.basename(file_path)
+    if filename.startswith("._") or filename == ".DS_Store":
+        return {"filename": filename, "status": "skipped", "error": "macOS metadata file"}
     if os.path.splitext(filename)[1].lower() not in ALLOWED_EXTENSIONS:
-        return
+        return {"filename": filename, "status": "skipped", "error": "unsupported extension"}
 
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
-    except Exception:
-        return
+    except Exception as e:
+        print(f"[process_file] Could not read {filename}: {e}")
+        return {"filename": filename, "status": "error", "error": f"could not read file: {e}"}
+
+    print(f"[process_file] Using Ollama at {settings.ollama_url} with model {settings.model_name}")
 
     # Consult RAG if MCP tools available
     rag_context = ""
@@ -152,6 +160,7 @@ async def process_file(
         )
         response.raise_for_status()
         raw_output = response.json().get("response", "")
+        print(f"[process_file] {filename}: Ollama returned {len(raw_output)} chars")
 
         # Try multi-file output
         new_files = parse_and_save_files(raw_output, extract_root)
@@ -162,6 +171,7 @@ async def process_file(
                 print(f"   -> {nf}")
             os.remove(file_path)
             print(f"   (Removed original {filename})")
+            return {"filename": filename, "status": "success"}
         else:
             # Single-file refactor
             cleaned_code = raw_output.strip()
@@ -171,11 +181,16 @@ async def process_file(
                 with open(file_path, "w", encoding="utf-8") as f:
                     f.write(cleaned_code)
                 print(f"Refactored {filename} (Single file update)")
+                return {"filename": filename, "status": "success"}
+            else:
+                print(f"[process_file] {filename}: LLM returned empty or refused response. Raw output length: {len(raw_output)}, starts with: {repr(raw_output[:200])}")
+                return {"filename": filename, "status": "error", "error": "LLM returned empty or refused response"}
 
     except Exception as e:
         import traceback
         print(f"Error processing {filename}: {type(e).__name__} - {e}")
         traceback.print_exc()
+        return {"filename": filename, "status": "error", "error": f"{type(e).__name__}: {e}"}
 
 
 @router.post("/refactor")
@@ -184,6 +199,8 @@ async def refactor_endpoint(
     file: UploadFile = File(...),
     instructions: str = Form(...),
 ):
+    print(f"[refactor] Request received. Ollama URL: {settings.ollama_url}, Model: {settings.model_name}")
+
     work_dir = tempfile.mkdtemp()
     upload_zip = os.path.join(work_dir, "input.zip")
     extract_dir = os.path.join(work_dir, "source")
@@ -204,14 +221,35 @@ async def refactor_endpoint(
                 files_to_process.append(os.path.join(root, fname))
 
         sem = asyncio.Semaphore(1)
+        results: list[dict] = []
 
         async def worker(fp, instr, client):
             async with sem:
-                await process_file(fp, instr, client, extract_dir)
+                result = await process_file(fp, instr, client, extract_dir)
+                if result:
+                    results.append(result)
 
         async with httpx.AsyncClient() as client:
             tasks = [worker(fp, instructions, client) for fp in files_to_process]
             await asyncio.gather(*tasks)
+
+        # Check results: if every processable file failed, return an error instead of unchanged files
+        processed = [r for r in results if r["status"] != "skipped"]
+        failed = [r for r in processed if r["status"] == "error"]
+
+        if processed and len(failed) == len(processed):
+            error_details = [
+                {"file": r["filename"], "error": r.get("error", "unknown")}
+                for r in failed
+            ]
+            print(f"[refactor] All {len(failed)} file(s) failed processing")
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "error": "All files failed to process. Is Ollama running and the model pulled?",
+                    "details": error_details,
+                },
+            )
 
         with zipfile.ZipFile(output_zip, 'w', zipfile.ZIP_DEFLATED) as z:
             for root, _, files in os.walk(extract_dir):
@@ -220,10 +258,14 @@ async def refactor_endpoint(
                     arcname = os.path.relpath(file_path, extract_dir)
                     z.write(file_path, arcname)
 
+        # Log summary
+        succeeded = [r for r in processed if r["status"] == "success"]
+        print(f"[refactor] Done: {len(succeeded)} succeeded, {len(failed)} failed, {len(results) - len(processed)} skipped")
+
         return FileResponse(output_zip, filename="converted_project.zip", media_type="application/zip")
 
     except Exception as e:
-        return {"error": str(e)}
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
     finally:
         background_tasks.add_task(shutil.rmtree, work_dir)

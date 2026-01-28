@@ -7,8 +7,13 @@ Supports stdio, SSE, and Streamable HTTP transports.
 """
 
 import asyncio
+import json
+import time
+import logging
 from typing import Any, Union
 from contextlib import asynccontextmanager
+
+logger = logging.getLogger("mcp.monitor")
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -206,6 +211,20 @@ class MCPClientManager:
         """Get list of connected server names."""
         return list(self.connections.keys())
 
+    @staticmethod
+    def _summarize_result(result) -> str:
+        """Build a short string representation of an MCP tool result for logging."""
+        if not hasattr(result, "content"):
+            return repr(result)[:300]
+        parts = []
+        for item in result.content:
+            text = item.text if hasattr(item, "text") else str(item)
+            parts.append(text)
+        joined = " | ".join(parts)
+        if len(joined) > 300:
+            return joined[:300] + f"… ({len(joined)} chars total)"
+        return joined
+
     async def call_tool(self, server_name: str, tool_name: str, arguments: dict) -> Any:
         """Call a tool on an MCP server.
 
@@ -224,8 +243,26 @@ class MCPClientManager:
         if not connection:
             raise ValueError(f"Not connected to MCP server: {server_name}")
 
-        result = await connection.session.call_tool(tool_name, arguments)
-        return result
+        args_str = json.dumps(arguments, default=str)
+        logger.info("[MCP CALL] server=%s tool=%s args=%s", server_name, tool_name, args_str)
+
+        t0 = time.monotonic()
+        try:
+            result = await connection.session.call_tool(tool_name, arguments)
+            elapsed = time.monotonic() - t0
+            summary = self._summarize_result(result)
+            logger.info(
+                "[MCP RESULT] tool=%s elapsed=%.2fs result=%s",
+                tool_name, elapsed, summary,
+            )
+            return result
+        except Exception as e:
+            elapsed = time.monotonic() - t0
+            logger.error(
+                "[MCP ERROR] tool=%s elapsed=%.2fs error=%s: %s",
+                tool_name, elapsed, type(e).__name__, e,
+            )
+            raise
 
     async def call_tool_by_name(self, tool_name: str, arguments: dict) -> Any:
         """Call a tool by name, automatically finding the right server.
