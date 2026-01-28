@@ -1,0 +1,28 @@
+[project]
+name = "rag-mcp-server"
+version = "0.1.0"
+description = "RAG MCP Server - LlamaIndex + Ollama + Qdrant exposed via MCP protocol"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "httpx",
+    "mcp>=1.0.0",
+    "python-dotenv",
+    "llama-index-core",
+    "llama-index-llms-ollama",
+    "llama-index-embeddings-ollama",
+    "llama-index-vector-stores-qdrant",
+    "llama-index-readers-file",
+    "qdrant-client",
+]
+
+[project.scripts]
+rag-mcp-server = "rag_mcp_server.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.backends"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rag_mcp_server"]

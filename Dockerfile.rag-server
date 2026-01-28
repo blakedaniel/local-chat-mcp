@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install RAG server package
+COPY packages/rag-mcp-server/pyproject.toml packages/rag-mcp-server/
+COPY packages/rag-mcp-server/src/ packages/rag-mcp-server/src/
+
+RUN pip install --no-cache-dir ./packages/rag-mcp-server
+
+# Copy data directory
+COPY data/ data/
+
+EXPOSE 8001
+
+CMD ["python", "-m", "rag_mcp_server"]

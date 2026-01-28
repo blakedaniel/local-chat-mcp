@@ -1,0 +1,32 @@
+[project]
+name = "local-chat-agent"
+version = "0.1.0"
+description = "Local LLM Chat Agent with MCP integration"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "httpx",
+    "aiofiles",
+    "jinja2",
+    "mcp>=1.0.0",
+    "anyio",
+    "python-dotenv",
+]
+
+[project.scripts]
+local-chat-agent = "local_chat_agent.__main__:main"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+rag-mcp-server = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.backends"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/local_chat_agent"]
